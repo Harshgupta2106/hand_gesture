@@ -2,6 +2,7 @@ import cv2
 import mediapipe as mp
 import pyautogui
 from collections import deque
+import time
 
 # ---------------------------
 # PyAutoGUI setup
@@ -16,8 +17,8 @@ mp_draw = mp.solutions.drawing_utils
 
 hands = mp_hands.Hands(
     max_num_hands=1,
-    min_detection_confidence=0.7,
-    min_tracking_confidence=0.7
+    min_detection_confidence=0.8,
+    min_tracking_confidence=0.8
 )
 
 # ---------------------------
@@ -28,9 +29,11 @@ cap.set(3, 640)
 cap.set(4, 480)
 
 # ---------------------------
-# Finger detection smoothing
+# Finger detection smoothing & debounce
 # ---------------------------
-last_finger_counts = deque(maxlen=5)  # last 5 frames
+last_finger_counts = deque(maxlen=7)  # last 7 frames for stability
+gesture_cooldown = 0.15  # seconds between same action
+last_action_time = time.time()
 
 # ---------------------------
 # Finger counting function
@@ -39,11 +42,11 @@ def count_fingers(hand_landmarks):
     lm = hand_landmarks.landmark
     fingers = 0
 
-    # Thumb (x coordinate)
-    if lm[4].x < lm[3].x:
+    # Thumb
+    if lm[4].x < lm[3].x:  # thumb tip left of joint
         fingers += 1
 
-    # Other fingers (y coordinate)
+    # Other fingers
     for tip in [8, 12, 16, 20]:
         if lm[tip].y < lm[tip - 2].y:
             fingers += 1
@@ -70,36 +73,59 @@ while True:
             fingers = count_fingers(hand_landmarks)
 
     # ---------------------------
-    # Smooth fingers using last 5 frames
+    # Smooth fingers using last frames
     # ---------------------------
     last_finger_counts.append(fingers)
     smooth_fingers = max(set(last_finger_counts), key=last_finger_counts.count)
 
     # ---------------------------
-    # Gesture mapping to keys
+    # Debounce: prevent repeated triggers
     # ---------------------------
+    current_time = time.time()
+    if current_time - last_action_time < gesture_cooldown:
+        smooth_fingers = 0  # ignore if cooldown not passed
+
+    # ---------------------------
+    # Custom Gesture Mapping
+    # ---------------------------
+    action = "NO ACTION"
+
     if smooth_fingers == 1:
-        pyautogui.keyDown("left")
-        pyautogui.keyUp("right")
-        action = "MOVE LEFT"
-    elif smooth_fingers == 2:
         pyautogui.keyDown("right")
         pyautogui.keyUp("left")
         action = "MOVE RIGHT"
+        last_action_time = current_time
+
+    elif smooth_fingers == 2:
+        pyautogui.keyDown("left")
+        pyautogui.keyUp("right")
+        action = "MOVE LEFT"
+        last_action_time = current_time
+
     elif smooth_fingers == 3:
         pyautogui.press("space")  # jump
         pyautogui.keyUp("left")
         pyautogui.keyUp("right")
         action = "JUMP"
+        last_action_time = current_time
+
+    elif smooth_fingers == 4:
+        pyautogui.press("down")  # crunch / duck
+        pyautogui.keyUp("left")
+        pyautogui.keyUp("right")
+        action = "CRUNCH"
+        last_action_time = current_time
+
     elif smooth_fingers == 5:
         pyautogui.press("ctrl")  # action / fire
         pyautogui.keyUp("left")
         pyautogui.keyUp("right")
         action = "ACTION"
+        last_action_time = current_time
+
     else:
         pyautogui.keyUp("left")
         pyautogui.keyUp("right")
-        action = "NO ACTION"
 
     # ---------------------------
     # Display action on screen
